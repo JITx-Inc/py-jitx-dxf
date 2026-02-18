@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "jitx-dxf"
+version = "0.1.0"
+description = "Convert between JITX board designs and DXF format"
+requires-python = ">= 3.12"
+dependencies = ["ezdxf"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+jitx-dxf = "jitx_dxf.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jitx_dxf"]
