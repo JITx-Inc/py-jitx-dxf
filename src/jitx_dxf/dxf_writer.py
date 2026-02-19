@@ -69,7 +69,7 @@ def _flip_side(side: str) -> str:
     return "Bottom" if side == "Top" else "Top"
 
 
-def _resolve_side(shape_side: str, inst_side: str) -> str:
+def resolve_side(shape_side: str, inst_side: str) -> str:
     """Resolve a shape's layer side for a given instance placement.
 
     Package shapes are defined relative to a Top-side placement.  When the
@@ -307,13 +307,13 @@ def emit_instance(
         emit_polygon_pads(msp, pkg.polygon_pads, inst.pose, inst.side)
 
     for poly in pkg.polygons:
-        resolved_side = _resolve_side(poly.side, inst.side)
+        resolved_side = resolve_side(poly.side, inst.side)
         layer = get_dxf_layer(poly.layer_name, resolved_side)
         if layer_filter is None or layer in layer_filter:
             emit_polygon(msp, poly.points, layer, inst.pose)
 
     for line_shape in pkg.lines:
-        resolved_side = _resolve_side(line_shape.side, inst.side)
+        resolved_side = resolve_side(line_shape.side, inst.side)
         layer = get_dxf_layer(line_shape.layer_name, resolved_side)
         if layer_filter is None or layer in layer_filter:
             emit_line_shape(msp, line_shape, inst.pose, layer)

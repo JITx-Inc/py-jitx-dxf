@@ -208,3 +208,6 @@ __marimo__/
 
 # JITX ignores
 .socket.jitx
+
+# OS
+.DS_Store

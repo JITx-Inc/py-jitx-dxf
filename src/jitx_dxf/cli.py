@@ -6,7 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from .dxf_writer import convert, copper_layer_name, get_dxf_layer
+from .dxf_writer import resolve_side, convert, copper_layer_name, get_dxf_layer
 from .xml_parser import parse_xml
 
 
@@ -51,9 +51,11 @@ def list_layers(xml_path: str) -> None:
         if any(p.hole_radius > 0 for p in pkg.polygon_pads):
             layers.add("Drill")
         for poly in pkg.polygons:
-            layers.add(get_dxf_layer(poly.layer_name, poly.side))
+            resolved = resolve_side(poly.side, inst.side)
+            layers.add(get_dxf_layer(poly.layer_name, resolved))
         for ls in pkg.lines:
-            layers.add(get_dxf_layer(ls.layer_name, ls.side))
+            resolved = resolve_side(ls.side, inst.side)
+            layers.add(get_dxf_layer(ls.layer_name, resolved))
         for ts in inst.shapes_text:
             layers.add(get_dxf_layer(ts.layer_name, ts.side))
         for poly in inst.shapes_polygon:
