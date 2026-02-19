@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<JITX-BOARD>
+  <BOARD>
+    <!-- Minimal board boundary -->
+    <BOARD-BOUNDARY>
+      <LINE WIDTH="0.0">
+        <POINT X="0" Y="0"/>
+        <POINT X="20" Y="0"/>
+      </LINE>
+    </BOARD-BOUNDARY>
+    <BOARD-BOUNDARY>
+      <LINE WIDTH="0.0">
+        <POINT X="20" Y="0"/>
+        <POINT X="20" Y="20"/>
+      </LINE>
+    </BOARD-BOUNDARY>
+    <BOARD-BOUNDARY>
+      <LINE WIDTH="0.0">
+        <POINT X="20" Y="20"/>
+        <POINT X="0" Y="20"/>
+      </LINE>
+    </BOARD-BOUNDARY>
+    <BOARD-BOUNDARY>
+      <LINE WIDTH="0.0">
+        <POINT X="0" Y="20"/>
+        <POINT X="0" Y="0"/>
+      </LINE>
+    </BOARD-BOUNDARY>
+
+    <!-- Simple stackup -->
+    <STACKUP>
+      <STACKUP-LAYER NAME="F.Cu" MATERIAL-TYPE="CONDUCTOR"/>
+      <STACKUP-LAYER NAME="Core" MATERIAL-TYPE="DIELECTRIC"/>
+      <STACKUP-LAYER NAME="B.Cu" MATERIAL-TYPE="CONDUCTOR"/>
+    </STACKUP>
+
+    <!-- Package with pads, silkscreen, courtyard, and a custom layer -->
+    <PACKAGE NAME="TEST-PKG">
+      <PAD NAME="p1" SIDE="Top">
+        <POSE X="-1" Y="0" ANGLE="0" FLIPX="false"/>
+        <CIRCLE RADIUS="0.5"/>
+      </PAD>
+      <PAD NAME="p2" SIDE="Top">
+        <POSE X="1" Y="0" ANGLE="0" FLIPX="false"/>
+        <CIRCLE RADIUS="0.5"/>
+      </PAD>
+
+      <!-- Silkscreen outline (Top-side) -->
+      <SHAPE>
+        <LAYER-SPECIFIER NAME="SILKSCREEN" SIDE="Top"/>
+        <POLYGON>
+          <POINT X="-2" Y="-1"/>
+          <POINT X="2" Y="-1"/>
+          <POINT X="2" Y="1"/>
+          <POINT X="-2" Y="1"/>
+        </POLYGON>
+      </SHAPE>
+
+      <!-- Courtyard (Top-side) -->
+      <SHAPE>
+        <LAYER-SPECIFIER NAME="COURTYARD" SIDE="Top"/>
+        <POLYGON>
+          <POINT X="-2.5" Y="-1.5"/>
+          <POINT X="2.5" Y="-1.5"/>
+          <POINT X="2.5" Y="1.5"/>
+          <POINT X="-2.5" Y="1.5"/>
+        </POLYGON>
+      </SHAPE>
+
+      <!-- Custom layer (Top-side) -->
+      <SHAPE>
+        <LAYER-SPECIFIER NAME="FINISH" SIDE="Top"/>
+        <POLYGON>
+          <POINT X="-1.5" Y="-0.5"/>
+          <POINT X="1.5" Y="-0.5"/>
+          <POINT X="1.5" Y="0.5"/>
+          <POINT X="-1.5" Y="0.5"/>
+        </POLYGON>
+      </SHAPE>
+
+      <!-- Line shape (Top-side silkscreen) -->
+      <SHAPE>
+        <LAYER-SPECIFIER NAME="SILKSCREEN" SIDE="Top"/>
+        <LINE WIDTH="0.15">
+          <POINT X="-2" Y="0"/>
+          <POINT X="-1.5" Y="0"/>
+        </LINE>
+      </SHAPE>
+    </PACKAGE>
+
+    <!-- Instance on Top -->
+    <INST DESIGNATOR="U1" PACKAGE="TEST-PKG" SIDE="Top">
+      <POSE X="5" Y="10" ANGLE="0" FLIPX="false"/>
+      <DESIGNATOR-TEXT>
+        <TEXT STRING="U1" SIZE="1.0" ANCHOR="C">
+          <POSE X="0" Y="2" ANGLE="0" FLIPX="false"/>
+        </TEXT>
+      </DESIGNATOR-TEXT>
+    </INST>
+
+    <!-- Instance on Bottom -->
+    <INST DESIGNATOR="U2" PACKAGE="TEST-PKG" SIDE="Bottom">
+      <POSE X="15" Y="10" ANGLE="0" FLIPX="false"/>
+      <DESIGNATOR-TEXT>
+        <TEXT STRING="U2" SIZE="1.0" ANCHOR="C">
+          <POSE X="0" Y="2" ANGLE="0" FLIPX="false"/>
+        </TEXT>
+      </DESIGNATOR-TEXT>
+    </INST>
+  </BOARD>
+</JITX-BOARD>
