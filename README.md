@@ -11,6 +11,13 @@ pip install -e .
 pip install -e ".[dev]"
 ```
 
+After installation, the `jitx-dxf` command is available. Alternatively, you can
+run directly from source without installing:
+
+```bash
+python -m jitx_dxf <subcommand> [options]
+```
+
 ## Usage
 
 ### Export: JITX XML to DXF
