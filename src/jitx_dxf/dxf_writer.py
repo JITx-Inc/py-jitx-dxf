@@ -64,6 +64,23 @@ def get_dxf_layer(layer_name: str, side: str) -> str:
     return mapping.get(layer_name, f"{layer_name}_{side}")
 
 
+def _flip_side(side: str) -> str:
+    """Return the opposite board side."""
+    return "Bottom" if side == "Top" else "Top"
+
+
+def _resolve_side(shape_side: str, inst_side: str) -> str:
+    """Resolve a shape's layer side for a given instance placement.
+
+    Package shapes are defined relative to a Top-side placement.  When the
+    instance is on the Bottom, every Top shape must flip to Bottom and vice
+    versa.
+    """
+    if inst_side == "Bottom":
+        return _flip_side(shape_side)
+    return shape_side
+
+
 def setup_layers(doc: Drawing, layer_names: dict[int, str]) -> None:
     for layer_name, props in LAYER_DEFS.items():
         doc.layers.add(layer_name, color=props["color"])
@@ -250,9 +267,10 @@ def emit_polygon(
 
 
 def emit_line_shape(
-    msp: Modelspace, line_shape: LineShape, pose: Pose | None = None
+    msp: Modelspace, line_shape: LineShape, pose: Pose | None = None, layer: str | None = None,
 ) -> None:
-    layer = get_dxf_layer(line_shape.layer_name, line_shape.side)
+    if layer is None:
+        layer = get_dxf_layer(line_shape.layer_name, line_shape.side)
     p1 = line_shape.line.p1
     p2 = line_shape.line.p2
     if pose is not None:
@@ -289,14 +307,16 @@ def emit_instance(
         emit_polygon_pads(msp, pkg.polygon_pads, inst.pose, inst.side)
 
     for poly in pkg.polygons:
-        layer = get_dxf_layer(poly.layer_name, poly.side)
+        resolved_side = _resolve_side(poly.side, inst.side)
+        layer = get_dxf_layer(poly.layer_name, resolved_side)
         if layer_filter is None or layer in layer_filter:
             emit_polygon(msp, poly.points, layer, inst.pose)
 
     for line_shape in pkg.lines:
-        layer = get_dxf_layer(line_shape.layer_name, line_shape.side)
+        resolved_side = _resolve_side(line_shape.side, inst.side)
+        layer = get_dxf_layer(line_shape.layer_name, resolved_side)
         if layer_filter is None or layer in layer_filter:
-            emit_line_shape(msp, line_shape, inst.pose)
+            emit_line_shape(msp, line_shape, inst.pose, layer)
 
     if layer_filter is None or "Components" in layer_filter:
         if inst.designator_text is not None:
