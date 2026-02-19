@@ -6,68 +6,14 @@ import argparse
 import sys
 from pathlib import Path
 
-from .dxf_writer import resolve_side, convert, copper_layer_name, get_dxf_layer
+from .dxf_writer import _collect_layers, convert
 from .xml_parser import parse_xml
 
 
 def list_layers(xml_path: str) -> None:
     """Parse the XML and print all DXF layer names that would be generated."""
     data = parse_xml(xml_path)
-
-    # Collect all layer names that would appear in the DXF
-    layers: set[str] = set()
-
-    # Static layers
-    if data.boundary_lines or data.boundary_arcs:
-        layers.add("BoardOutline")
-    if data.vias:
-        layers.update(["Vias", "Drill"])
-    if data.instances:
-        layers.add("Components")
-
-    # Copper layers from stackup
-    for idx in data.layer_names:
-        name = data.layer_names[idx]
-        layers.add(f"Copper_{name}")
-
-    # Layers from tracks and fills (in case they reference layers not in stackup)
-    for track in data.tracks:
-        layers.add(copper_layer_name(track.layer_index, data.layer_names, "Copper"))
-    for fill in data.fills:
-        layers.add(copper_layer_name(fill.layer_index, data.layer_names, "Copper"))
-
-    # Layers from packages (instantiated via INST)
-    for inst in data.instances:
-        pkg = data.packages.get(inst.package_name)
-        if pkg is None:
-            continue
-        pad_layer = f"Pads_{inst.side}"
-        if pkg.pads or pkg.rectangle_pads or pkg.polygon_pads:
-            layers.add(pad_layer)
-        if any(p.hole_radius > 0 for p in pkg.pads):
-            layers.add("Drill")
-        if any(p.hole_radius > 0 for p in pkg.rectangle_pads):
-            layers.add("Drill")
-        if any(p.hole_radius > 0 for p in pkg.polygon_pads):
-            layers.add("Drill")
-        for poly in pkg.polygons:
-            resolved = resolve_side(poly.side, inst.side)
-            layers.add(get_dxf_layer(poly.layer_name, resolved))
-        for ls in pkg.lines:
-            resolved = resolve_side(ls.side, inst.side)
-            layers.add(get_dxf_layer(ls.layer_name, resolved))
-        for ts in inst.shapes_text:
-            layers.add(get_dxf_layer(ts.layer_name, ts.side))
-        for poly in inst.shapes_polygon:
-            layers.add(get_dxf_layer(poly.layer_name, poly.side))
-        for ls in inst.shapes_line:
-            layers.add(get_dxf_layer(ls.layer_name, ls.side))
-
-    # Layers from board-level shapes
-    for shape in data.board_shapes:
-        layers.add(get_dxf_layer(shape.layer_name, shape.side))
-    for ls in data.board_line_shapes:
-        layers.add(get_dxf_layer(ls.layer_name, ls.side))
+    layers = _collect_layers(data)
 
     print("Available DXF layers:")
     for name in sorted(layers):

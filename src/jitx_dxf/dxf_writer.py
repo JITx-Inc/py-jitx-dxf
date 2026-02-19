@@ -33,7 +33,7 @@ from .xml_parser import parse_xml
 
 # ─── DXF Layer Setup ─────────────────────────────────────────────────────
 
-LAYER_DEFS = {
+LAYER_DEFS: dict[str, dict[str, int]] = {
     "BoardOutline": {"color": 7},
     "Pads_Top": {"color": 1},
     "Pads_Bottom": {"color": 5},
@@ -43,6 +43,12 @@ LAYER_DEFS = {
     "Silkscreen_Bottom": {"color": 4},
     "Courtyard_Top": {"color": 6},
     "Courtyard_Bottom": {"color": 2},
+    "Soldermask_Top": {"color": 94},
+    "Soldermask_Bottom": {"color": 96},
+    "Paste_Top": {"color": 9},
+    "Paste_Bottom": {"color": 9},
+    "Finish_Top": {"color": 40},
+    "Finish_Bottom": {"color": 40},
     "Components": {"color": 7},
 }
 
@@ -57,11 +63,25 @@ def copper_layer_name(layer_index: int, layer_names: dict[int, str], prefix: str
 
 
 def get_dxf_layer(layer_name: str, side: str) -> str:
-    mapping = {
-        "SILKSCREEN": f"Silkscreen_{side}",
-        "COURTYARD": f"Courtyard_{side}",
-    }
-    return mapping.get(layer_name, f"{layer_name}_{side}")
+    """Map an XML LAYER-SPECIFIER NAME + SIDE to a DXF layer name.
+
+    Well-known PCB layer names are normalized to Title_Case for consistency.
+    Unknown names are passed through with the side suffix.
+    """
+    normalized = _LAYER_NAME_MAP.get(layer_name)
+    if normalized is not None:
+        return f"{normalized}_{side}"
+    return f"{layer_name}_{side}"
+
+
+# Normalized display names for well-known XML LAYER-SPECIFIER NAME values.
+_LAYER_NAME_MAP: dict[str, str] = {
+    "SILKSCREEN": "Silkscreen",
+    "COURTYARD": "Courtyard",
+    "SOLDERMASK": "Soldermask",
+    "PASTE": "Paste",
+    "FINISH": "Finish",
+}
 
 
 def _flip_side(side: str) -> str:
@@ -81,13 +101,80 @@ def resolve_side(shape_side: str, inst_side: str) -> str:
     return shape_side
 
 
-def setup_layers(doc: Drawing, layer_names: dict[int, str]) -> None:
-    for layer_name, props in LAYER_DEFS.items():
-        doc.layers.add(layer_name, color=props["color"])
-    # Create a single copper layer per conductor layer in the stackup
-    for idx, name in layer_names.items():
-        color = COPPER_COLORS[idx % len(COPPER_COLORS)]
-        doc.layers.add(f"Copper_{name}", color=color)
+_DYNAMIC_COLORS = [10, 20, 30, 50, 70, 90, 110, 130, 150, 170, 190, 210]
+
+
+def _collect_layers(data: BoardData) -> set[str]:
+    """Pre-scan board data to determine all DXF layers that will be used."""
+    layers: set[str] = set()
+
+    if data.boundary_lines or data.boundary_arcs:
+        layers.add("BoardOutline")
+    if data.vias:
+        layers.update(["Vias", "Drill"])
+    if data.instances:
+        layers.add("Components")
+
+    for idx, name in data.layer_names.items():
+        layers.add(f"Copper_{name}")
+    for track in data.tracks:
+        layers.add(copper_layer_name(track.layer_index, data.layer_names, "Copper"))
+    for fill in data.fills:
+        layers.add(copper_layer_name(fill.layer_index, data.layer_names, "Copper"))
+
+    for inst in data.instances:
+        pkg = data.packages.get(inst.package_name)
+        if pkg is None:
+            continue
+        pad_layer = f"Pads_{inst.side}"
+        if pkg.pads or pkg.rectangle_pads or pkg.polygon_pads:
+            layers.add(pad_layer)
+        if any(p.hole_radius > 0 for p in pkg.pads) or \
+           any(p.hole_radius > 0 for p in pkg.rectangle_pads) or \
+           any(p.hole_radius > 0 for p in pkg.polygon_pads):
+            layers.add("Drill")
+        for poly in pkg.polygons:
+            resolved = resolve_side(poly.side, inst.side)
+            layers.add(get_dxf_layer(poly.layer_name, resolved))
+        for ls in pkg.lines:
+            resolved = resolve_side(ls.side, inst.side)
+            layers.add(get_dxf_layer(ls.layer_name, resolved))
+        for ts in inst.shapes_text:
+            layers.add(get_dxf_layer(ts.layer_name, ts.side))
+        for poly in inst.shapes_polygon:
+            layers.add(get_dxf_layer(poly.layer_name, poly.side))
+        for ls in inst.shapes_line:
+            layers.add(get_dxf_layer(ls.layer_name, ls.side))
+
+    for shape in data.board_shapes:
+        layers.add(get_dxf_layer(shape.layer_name, shape.side))
+    for ls in data.board_line_shapes:
+        layers.add(get_dxf_layer(ls.layer_name, ls.side))
+
+    return layers
+
+
+def setup_layers(doc: Drawing, data: BoardData) -> None:
+    """Create all DXF layers that will be used, with appropriate colors."""
+    needed = _collect_layers(data)
+    dynamic_idx = 0
+
+    for layer_name in sorted(needed):
+        if layer_name in LAYER_DEFS:
+            doc.layers.add(layer_name, color=LAYER_DEFS[layer_name]["color"])
+        elif layer_name.startswith("Copper_"):
+            # Derive color from the copper layer index
+            idx = next(
+                (i for i, n in data.layer_names.items()
+                 if f"Copper_{n}" == layer_name),
+                dynamic_idx,
+            )
+            color = COPPER_COLORS[idx % len(COPPER_COLORS)]
+            doc.layers.add(layer_name, color=color)
+        else:
+            color = _DYNAMIC_COLORS[dynamic_idx % len(_DYNAMIC_COLORS)]
+            doc.layers.add(layer_name, color=color)
+            dynamic_idx += 1
 
 
 # ─── DXF Emission Helpers ─────────────────────────────────────────────────
@@ -188,7 +275,6 @@ def emit_pads(
             radius=pad.radius,
             dxfattribs={"layer": layer},
         )
-        _emit_drill_hole(msp, pad.center, pad.hole_radius, pose)
 
 
 def emit_rectangle_pads(
@@ -216,8 +302,6 @@ def emit_rectangle_pads(
             board_pt = transform_point(pkg_pt, inst_pose)
             transformed.append((board_pt.x, board_pt.y))
         msp.add_lwpolyline(transformed, close=True, dxfattribs={"layer": layer})
-        # Drill hole at pad center
-        _emit_drill_hole(msp, Point(pad.pad_pose.x, pad.pad_pose.y), pad.hole_radius, inst_pose)
 
 
 def emit_polygon_pads(
@@ -240,7 +324,17 @@ def emit_polygon_pads(
             close=True,
             dxfattribs={"layer": layer},
         )
-        # Drill hole at pad center
+
+
+def emit_pad_drill_holes(
+    msp: Modelspace, pkg: Package, inst_pose: Pose
+) -> None:
+    """Emit drill holes on the Drill layer for all through-hole pads in a package."""
+    for pad in pkg.pads:
+        _emit_drill_hole(msp, pad.center, pad.hole_radius, inst_pose)
+    for pad in pkg.rectangle_pads:
+        _emit_drill_hole(msp, Point(pad.pad_pose.x, pad.pad_pose.y), pad.hole_radius, inst_pose)
+    for pad in pkg.polygon_pads:
         _emit_drill_hole(msp, Point(pad.pose.x, pad.pose.y), pad.hole_radius, inst_pose)
 
 
@@ -301,10 +395,13 @@ def emit_instance(
         )
 
     pad_layer = f"Pads_{inst.side}"
-    if layer_filter is None or pad_layer in layer_filter or "Drill" in (layer_filter or set()):
+    if layer_filter is None or pad_layer in layer_filter:
         emit_pads(msp, pkg.pads, inst.pose, inst.side)
         emit_rectangle_pads(msp, pkg.rectangle_pads, inst.pose, inst.side)
         emit_polygon_pads(msp, pkg.polygon_pads, inst.pose, inst.side)
+
+    if layer_filter is None or "Drill" in layer_filter:
+        emit_pad_drill_holes(msp, pkg, inst.pose)
 
     for poly in pkg.polygons:
         resolved_side = resolve_side(poly.side, inst.side)
@@ -490,7 +587,7 @@ def convert(
 
     doc = ezdxf_new("R2010")
     doc.units = ezdxf_units.MM
-    setup_layers(doc, data.layer_names)
+    setup_layers(doc, data)
     msp = doc.modelspace()
 
     if layers is None or "BoardOutline" in layers:
