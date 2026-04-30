@@ -60,6 +60,22 @@ jitx-dxf import board.dxf --layer-map OUTER_PROFILES=outline HOLES=hole
 jitx-dxf import outline.dxf --no-recenter
 ```
 
+#### Generated output structure
+
+For `--class-name MyBoard`, the importer emits up to three classes:
+
+* `class MyBoard(Board)` with the outline assigned to `shape`.
+* `class MyCircuit(Circuit)` whose `__init__` sets `self.cutouts` to a list of
+  `Cutout(...)` features — one per detected cutout or mounting hole. Only
+  emitted when the DXF contains cutouts or holes.
+* `class MyDesign(Design)` instantiating the Board and Circuit. Emitted
+  alongside `MyCircuit`.
+
+A trailing `Board` suffix is stripped before deriving the Circuit/Design names
+so common inputs produce clean output (`MyBoard` → `MyCircuit`, `MyDesign`).
+Pass a name without the suffix to get verbose names (`Foo` → `FooCircuit`,
+`FooDesign`).
+
 ### Inspect a DXF file
 
 ```bash
@@ -91,6 +107,11 @@ print(f"Holes: {len(classified.holes)}")
 code = generate_board_code(classified, class_name="MyBoard")
 print(code)
 ```
+
+For partial code (when grafting onto an existing design), use the snippet
+helpers — `generate_outline_snippet`, `generate_cutouts_snippet`, and
+`generate_holes_snippet` — each of which returns a small string that can be
+pasted into a hand-written Board or Circuit subclass.
 
 ## DXF Import Details
 
