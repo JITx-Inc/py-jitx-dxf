@@ -6,12 +6,11 @@ Uses ezdxf to parse DXF entities and classifies them by PCB role
 
 from __future__ import annotations
 
+import logging
 import math
 from collections import defaultdict
 
 import ezdxf
-
-import logging
 
 from .models import (
     ArcPathSegment,

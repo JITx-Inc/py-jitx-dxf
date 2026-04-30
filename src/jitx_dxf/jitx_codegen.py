@@ -9,6 +9,7 @@ The structure mirrors the output of ``jitx-emn-importer``.
 from __future__ import annotations
 
 import math
+
 from .models import (
     ArcPathSegment,
     ClassifiedEntities,

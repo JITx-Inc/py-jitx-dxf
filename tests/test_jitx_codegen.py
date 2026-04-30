@@ -80,7 +80,6 @@ class TestGenerateBoardCode:
         """jitx.shapes.primitive.Arc requires start in [0, 360); the
         path_assembler emits raw atan2 angles that can be negative.
         Verify the codegen does the wrap before emission."""
-        import re
 
         classified = classify_entities(str(FIXTURES / "beeper_flex_outline.dxf"))
         code = generate_board_code(classified, class_name="BeeperBoard")
