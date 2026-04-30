@@ -29,7 +29,7 @@ def test_top_instance_keeps_top_layers(tmp_path: Path) -> None:
     out = str(tmp_path / "out.dxf")
     # Only emit layers relevant to U1 (Top-side)
     convert(str(FIXTURE), out, layers={
-        "Pads_Top", "Silkscreen_Top", "Courtyard_Top", "FINISH_Top",
+        "Pads_Top", "Silkscreen_Top", "Courtyard_Top", "Finish_Top",
     })
     counts = _layer_counts(out)
 
@@ -40,12 +40,12 @@ def test_top_instance_keeps_top_layers(tmp_path: Path) -> None:
     # Courtyard_Top: 1 polygon from U1
     assert counts.get("Courtyard_Top", 0) == 1
     # Custom layer on Top: 1 polygon from U1
-    assert counts.get("FINISH_Top", 0) == 1
+    assert counts.get("Finish_Top", 0) == 1
 
     # Nothing should appear on Bottom layers
     assert counts.get("Silkscreen_Bottom", 0) == 0
     assert counts.get("Courtyard_Bottom", 0) == 0
-    assert counts.get("FINISH_Bottom", 0) == 0
+    assert counts.get("Finish_Bottom", 0) == 0
 
 
 def test_bottom_instance_flips_to_bottom_layers(tmp_path: Path) -> None:
@@ -53,7 +53,7 @@ def test_bottom_instance_flips_to_bottom_layers(tmp_path: Path) -> None:
     out = str(tmp_path / "out.dxf")
     # Only emit layers relevant to U2 (Bottom-side)
     convert(str(FIXTURE), out, layers={
-        "Pads_Bottom", "Silkscreen_Bottom", "Courtyard_Bottom", "FINISH_Bottom",
+        "Pads_Bottom", "Silkscreen_Bottom", "Courtyard_Bottom", "Finish_Bottom",
     })
     counts = _layer_counts(out)
 
@@ -64,12 +64,12 @@ def test_bottom_instance_flips_to_bottom_layers(tmp_path: Path) -> None:
     # Courtyard_Bottom: 1 polygon from U2 (flipped from Top)
     assert counts.get("Courtyard_Bottom", 0) == 1
     # Custom layer on Bottom: 1 polygon from U2 (flipped from Top)
-    assert counts.get("FINISH_Bottom", 0) == 1
+    assert counts.get("Finish_Bottom", 0) == 1
 
     # Nothing from U2 should land on Top layers
     assert counts.get("Silkscreen_Top", 0) == 0
     assert counts.get("Courtyard_Top", 0) == 0
-    assert counts.get("FINISH_Top", 0) == 0
+    assert counts.get("Finish_Top", 0) == 0
 
 
 def test_both_instances_unfiltered(tmp_path: Path) -> None:
@@ -91,5 +91,5 @@ def test_both_instances_unfiltered(tmp_path: Path) -> None:
     assert counts.get("Courtyard_Bottom", 0) == 1
 
     # Each instance contributes 1 custom-layer polygon
-    assert counts.get("FINISH_Top", 0) == 1
-    assert counts.get("FINISH_Bottom", 0) == 1
+    assert counts.get("Finish_Top", 0) == 1
+    assert counts.get("Finish_Bottom", 0) == 1
