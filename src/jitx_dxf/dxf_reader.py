@@ -223,7 +223,11 @@ def _resolve_unit_scale(
     3. Bounding box heuristic
     """
     if forced_unit:
-        return _UNIT_TO_MM.get(forced_unit, 1.0)
+        if forced_unit not in _UNIT_TO_MM:
+            raise ValueError(
+                f"Invalid unit {forced_unit!r}; expected one of {sorted(_UNIT_TO_MM)}"
+            )
+        return _UNIT_TO_MM[forced_unit]
 
     # Compute raw bounding box extent for heuristic validation
     xs: list[float] = []
@@ -317,8 +321,7 @@ def _parse_lwpolyline(entity, unit_scale: float) -> ClosedPath | None:
 
     raw_points = list(entity.get_points(format="xyseb"))
     points = [(p[0] * unit_scale, p[1] * unit_scale) for p in raw_points]
-    # Bulge is the 4th element in xyseb format (index 3 after x,y,start_width)
-    # Actually in xyseb: x=0, y=1, s=start_width=2, e=end_width=3, b=bulge=4
+    # xyseb tuple layout: x=0, y=1, start_width=2, end_width=3, bulge=4.
     bulges = [p[4] if len(p) > 4 else 0.0 for p in raw_points]
 
     return lwpolyline_to_closed_path(points, bulges, entity.dxf.layer)
