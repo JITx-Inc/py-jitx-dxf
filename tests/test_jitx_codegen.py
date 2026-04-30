@@ -55,11 +55,83 @@ class TestGenerateBoardCode:
         assert "Polygon" in code
         assert "ArcPolyline" not in code
 
-    def test_beeper_has_arc_polyline(self):
-        """beeper flex outline should use ArcPolyline (has bulge arcs)."""
+    def test_beeper_has_arc_polygon(self):
+        """beeper flex outline should use ArcPolygon (closed shape with bulge arcs)."""
         classified = classify_entities(str(FIXTURES / "beeper_flex_outline.dxf"))
         code = generate_board_code(classified, class_name="BeeperBoard")
-        assert "ArcPolyline" in code
+        assert "ArcPolygon" in code
+        # ArcPolyline (which would require a width arg) must NOT appear.
+        assert "ArcPolyline" not in code
+
+    def test_beeper_imports_arc_when_emitting_arcs(self):
+        """When the codegen emits Arc(...) inside an ArcPolyline, it must
+        also import Arc — otherwise the generated file fails at class-body
+        evaluation with NameError."""
+        classified = classify_entities(str(FIXTURES / "beeper_flex_outline.dxf"))
+        code = generate_board_code(classified, class_name="BeeperBoard")
+        assert "Arc(" in code, "fixture should produce at least one Arc(...) literal"
+        assert "import Arc" in code or ", Arc" in code or "Arc," in code, (
+            "Arc must be imported alongside ArcPolyline"
+        )
+        # And the file should compile.
+        compile(code, "<beeper_arc_imports>", "exec")
+
+    def test_arc_start_angle_is_normalized(self):
+        """jitx.shapes.primitive.Arc requires start in [0, 360); the
+        path_assembler emits raw atan2 angles that can be negative.
+        Verify the codegen does the wrap before emission."""
+        import re
+
+        classified = classify_entities(str(FIXTURES / "beeper_flex_outline.dxf"))
+        code = generate_board_code(classified, class_name="BeeperBoard")
+        # Extract every Arc(...) literal — track parentheses by hand so we
+        # skip past the nested (cx, cy) tuple correctly.
+        def iter_arc_literals(text: str):
+            i = 0
+            while True:
+                idx = text.find("Arc(", i)
+                if idx < 0:
+                    return
+                depth = 0
+                j = idx + len("Arc(")
+                while j < len(text):
+                    ch = text[j]
+                    if ch == "(":
+                        depth += 1
+                    elif ch == ")":
+                        if depth == 0:
+                            yield text[idx : j + 1]
+                            i = j + 1
+                            break
+                        depth -= 1
+                    j += 1
+                else:
+                    return
+
+        for literal in iter_arc_literals(code):
+            args = literal[len("Arc("):-1]
+            # Skip the (cx, cy) tuple
+            depth = 0
+            tail = ""
+            for i, ch in enumerate(args):
+                if ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    depth -= 1
+                elif ch == "," and depth == 0:
+                    tail = args[i + 1 :].strip()
+                    break
+            # tail now starts with the radius — split out start (3rd positional)
+            parts = [p.strip() for p in tail.split(",")]
+            assert len(parts) >= 3, f"unexpected Arc literal shape: {literal}"
+            start = float(parts[1])
+            sweep = float(parts[2])
+            assert 0.0 <= start < 360.0, (
+                f"Arc start must be in [0, 360); got {start} in {literal}"
+            )
+            assert -360.0 <= sweep <= 360.0, (
+                f"Arc sweep must be in [-360, 360]; got {sweep} in {literal}"
+            )
 
     def test_outline_uses_canonical_shape_attribute(self):
         """Board class should use `shape =` (the canonical jitx.Board attribute)."""
