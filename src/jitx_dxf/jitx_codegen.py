@@ -247,12 +247,11 @@ def _outline_expression(path: ClosedPath, offset: Point, indent_level: int) -> s
 
     # Check if it's a simple rectangle (all line segments, axis-aligned)
     if _is_axis_aligned_rectangle(path):
-        return (
-            f"Polygon([({_fmt(-w/2)}, {_fmt(-h/2)}), "
-            f"({_fmt(w/2)}, {_fmt(-h/2)}), "
-            f"({_fmt(w/2)}, {_fmt(h/2)}), "
-            f"({_fmt(-w/2)}, {_fmt(h/2)})])"
-        )
+        # NOTE: the rectangle branch always emits an origin-centered polygon and
+        # ignores `offset`. When `recenter=False` is requested with a non-centered
+        # outline, the rectangle short-cut is wrong; falling through to
+        # `_polygon_expression` would handle it correctly. Tracked separately.
+        return f"Polygon([({_fmt(-w/2)}, {_fmt(-h/2)}), ({_fmt(w/2)}, {_fmt(-h/2)}), ({_fmt(w/2)}, {_fmt(h/2)}), ({_fmt(-w/2)}, {_fmt(h/2)})])"
 
     has_arcs = any(isinstance(s, ArcPathSegment) for s in path.segments)
     if has_arcs:

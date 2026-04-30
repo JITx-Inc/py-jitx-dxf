@@ -3,7 +3,6 @@ component instance is placed on the Bottom side."""
 
 from __future__ import annotations
 
-import os
 from collections import Counter
 from pathlib import Path
 
