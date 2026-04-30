@@ -8,6 +8,8 @@ The structure mirrors the output of ``jitx-emn-importer``.
 
 from __future__ import annotations
 
+import math
+
 from .models import (
     ArcPathSegment,
     ClassifiedEntities,
@@ -173,7 +175,8 @@ def _imports(classified: ClassifiedEntities, has_features: bool) -> list[str]:
 
     shape_imports: list[str] = []
     if needs_arc_polygon:
-        shape_imports.append("ArcPolyline")
+        shape_imports.append("Arc")
+        shape_imports.append("ArcPolygon")
     if needs_circle:
         shape_imports.append("Circle")
     if needs_polygon:
@@ -277,7 +280,7 @@ def _polygon_expression(path: ClosedPath, offset: Point, indent_level: int) -> s
 
 
 def _arc_polygon_expression(path: ClosedPath, offset: Point, indent_level: int) -> str:
-    """Generate an ArcPolyline expression from a path with arcs."""
+    """Generate an ArcPolygon expression from a path with arcs."""
     pad = "    " * (indent_level + 1)
     elements: list[str] = []
 
@@ -294,12 +297,18 @@ def _arc_polygon_expression(path: ClosedPath, offset: Point, indent_level: int) 
             cx = _fmt(seg.center.x + offset.x)
             cy = _fmt(seg.center.y + offset.y)
             r = _fmt(seg.radius)
-            sa = _fmt(seg.start_angle)
-            ea = _fmt(seg.end_angle)
-            elements.append(f"Arc(({cx}, {cy}), {r}, {sa}, {ea})")
+            # jitx.shapes.primitive.Arc expects (start, arc_sweep) with
+            # start in [0, 360); the path_assembler stores raw atan2 angles
+            # that can be negative or exactly 360 after rounding. Normalize
+            # both the start and the sweep before emission.
+            sa_norm = _wrap_angle(seg.start_angle)
+            sweep_norm = _wrap_angle(seg.end_angle - seg.start_angle)
+            sa = _fmt(sa_norm)
+            sw = _fmt(sweep_norm)
+            elements.append(f"Arc(({cx}, {cy}), {r}, {sa}, {sw})")
 
     inner = f",\n{pad}".join(elements)
-    return f"ArcPolyline([\n{pad}{inner},\n{'    ' * indent_level}])"
+    return f"ArcPolygon([\n{pad}{inner},\n{'    ' * indent_level}])"
 
 
 def _path_expression(path: ClosedPath, offset: Point, indent_level: int) -> str:
@@ -324,6 +333,17 @@ def _is_axis_aligned_rectangle(path: ClosedPath) -> bool:
         if dx > 1e-6 and dy > 1e-6:
             return False  # Diagonal line
     return True
+
+
+def _wrap_angle(angle: float) -> float:
+    """Wrap an angle (degrees) to [0, 360). Defensive about float modulo edge
+    cases where ``-1e-12 % 360.0`` returns a value that rounds up to 360.0
+    after :func:`_fmt`'s 4-decimal rounding.
+    """
+    wrapped = angle - 360.0 * math.floor(angle / 360.0)
+    if wrapped >= 360.0 - 1e-6:
+        wrapped = 0.0
+    return wrapped
 
 
 def _fmt(value: float) -> str:
