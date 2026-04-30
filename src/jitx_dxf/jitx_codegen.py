@@ -6,18 +6,14 @@ cutouts, mounting holes, keepouts, and annotations.
 
 from __future__ import annotations
 
-import math
-from textwrap import dedent, indent
-
 from .models import (
     ArcPathSegment,
     ClassifiedEntities,
     ClosedPath,
-    DxfCircle,
     LinePathSegment,
     Point,
 )
-from .path_assembler import path_area, path_bounding_box
+from .path_assembler import path_bounding_box
 
 
 def generate_board_code(
@@ -218,8 +214,10 @@ def _outline_expression(path: ClosedPath, offset: Point, indent_level: int) -> s
 
     # Check if it's a simple rectangle (all line segments, axis-aligned)
     if _is_axis_aligned_rectangle(path):
-        cx = _fmt((bb[0].x + bb[1].x) / 2.0 + offset.x)
-        cy = _fmt((bb[0].y + bb[1].y) / 2.0 + offset.y)
+        # NOTE: the rectangle branch always emits an origin-centered polygon and
+        # ignores `offset`. When `recenter=False` is requested with a non-centered
+        # outline, the rectangle short-cut is wrong; falling through to
+        # `_polygon_expression` would handle it correctly. Tracked separately.
         return f"Polygon([({_fmt(-w/2)}, {_fmt(-h/2)}), ({_fmt(w/2)}, {_fmt(-h/2)}), ({_fmt(w/2)}, {_fmt(h/2)}), ({_fmt(-w/2)}, {_fmt(h/2)})])"
 
     has_arcs = any(isinstance(s, ArcPathSegment) for s in path.segments)

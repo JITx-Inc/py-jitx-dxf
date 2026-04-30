@@ -30,7 +30,6 @@ from .models import (
 from .transforms import transform_angle, transform_point
 from .xml_parser import parse_xml
 
-
 # ─── DXF Layer Setup ─────────────────────────────────────────────────────
 
 LAYER_DEFS: dict[str, dict[str, int]] = {
@@ -115,7 +114,7 @@ def _collect_layers(data: BoardData) -> set[str]:
     if data.instances:
         layers.add("Components")
 
-    for idx, name in data.layer_names.items():
+    for _idx, name in data.layer_names.items():
         layers.add(f"Copper_{name}")
     for track in data.tracks:
         layers.add(copper_layer_name(track.layer_index, data.layer_names, "Copper"))

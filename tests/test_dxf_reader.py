@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from jitx_dxf.dxf_reader import classify_entities, read_dxf
 
 FIXTURES = Path(__file__).parent / "fixtures"

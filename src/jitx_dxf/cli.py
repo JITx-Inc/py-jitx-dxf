@@ -89,7 +89,6 @@ def _cmd_import(args: argparse.Namespace) -> None:
     from .jitx_codegen import (
         generate_board_code,
         generate_cutouts_snippet,
-        generate_holes_snippet,
         generate_outline_snippet,
     )
 

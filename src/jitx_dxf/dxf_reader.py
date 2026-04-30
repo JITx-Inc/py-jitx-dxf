@@ -7,9 +7,7 @@ Uses ezdxf to parse DXF entities and classifies them by PCB role
 from __future__ import annotations
 
 import math
-import re
 from collections import defaultdict
-from pathlib import Path
 
 import ezdxf
 
@@ -185,7 +183,7 @@ def classify_entities(
         all_paths.extend(paths)
 
     # Add LWPOLYLINE closed paths
-    for layer, polys in layer_lwpolys.items():
+    for _layer, polys in layer_lwpolys.items():
         all_paths.extend(polys)
 
     # Classify everything
@@ -358,7 +356,6 @@ def _parse_hatch_entity(entity, unit_scale: float) -> DxfHatch | None:
     boundary_paths: list[ClosedPath] = []
     try:
         for bpath in entity.paths:
-            segments = []
             if hasattr(bpath, "vertices"):
                 # Polyline boundary
                 verts = list(bpath.vertices)
