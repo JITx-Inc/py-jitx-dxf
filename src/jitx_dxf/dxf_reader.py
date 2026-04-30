@@ -13,6 +13,8 @@ from pathlib import Path
 
 import ezdxf
 
+import logging
+
 from .models import (
     ArcPathSegment,
     ClassifiedEntities,
@@ -30,6 +32,8 @@ from .path_assembler import (
     path_bounding_box,
     point_in_path,
 )
+
+_logger = logging.getLogger(__name__)
 
 # ezdxf INSUNITS codes → unit names
 _INSUNITS_MAP: dict[int, str] = {
@@ -205,8 +209,8 @@ def _detect_units(doc: ezdxf.document.Drawing) -> str | None:
         insunits = doc.header.get("$INSUNITS", 0)
         if insunits in _INSUNITS_MAP:
             return _INSUNITS_MAP[insunits]
-    except Exception:
-        pass
+    except Exception as exc:
+        _logger.warning("Could not read $INSUNITS from DXF header: %s", exc)
     return None
 
 
@@ -283,8 +287,12 @@ def _collect_entity_coords(entity, xs: list[float], ys: list[float]) -> None:
             for pt in entity.control_points:
                 xs.append(pt[0])
                 ys.append(pt[1])
-        except Exception:
-            pass
+        except Exception as exc:
+            _logger.warning(
+                "Could not extract SPLINE control points on layer %r: %s",
+                getattr(entity.dxf, "layer", "?"),
+                exc,
+            )
 
 
 def _parse_arc_entity(entity, unit_scale: float) -> ArcPathSegment:
@@ -355,7 +363,12 @@ def _parse_hatch_entity(entity, unit_scale: float) -> DxfHatch | None:
     """Parse a DXF HATCH entity."""
     try:
         is_solid = entity.dxf.hatch_style == 0 or entity.dxf.pattern_name == "SOLID"
-    except Exception:
+    except Exception as exc:
+        _logger.warning(
+            "Could not determine HATCH solid-fill state on layer %r: %s",
+            getattr(entity.dxf, "layer", "?"),
+            exc,
+        )
         is_solid = False
 
     boundary_paths: list[ClosedPath] = []
@@ -402,7 +415,12 @@ def _parse_hatch_entity(entity, unit_scale: float) -> DxfHatch | None:
                 if lines or arcs:
                     paths = assemble_closed_paths(lines, arcs, source_layer=entity.dxf.layer)
                     boundary_paths.extend(paths)
-    except Exception:
+    except Exception as exc:
+        _logger.warning(
+            "Failed to parse HATCH boundary on layer %r: %s",
+            getattr(entity.dxf, "layer", "?"),
+            exc,
+        )
         return None
 
     if not boundary_paths:

@@ -107,17 +107,17 @@ def _walk_loop(
     """Walk from a starting segment to find a closed loop.
 
     Returns the list of segments forming the loop, or None if no loop found.
+    The chain tracks ``(segment_index, segment)`` pairs so that rollback on a
+    dead end can restore ``used`` flags by index — list lookup of a possibly
+    flipped segment in the original ``segments`` list would not match.
     """
-    chain: list[PathSegment] = []
-    current_idx = start_idx
-
-    # We start at the start-point of the first segment
-    seg = segments[current_idx]
+    seg = segments[start_idx]
     start_pt, end_pt = _segment_endpoints(seg)
     loop_start_key = _point_key(start_pt, grid_inv)
 
-    chain.append(seg)
-    used[current_idx] = True
+    chain: list[PathSegment] = [seg]
+    chain_indices: list[int] = [start_idx]
+    used[start_idx] = True
     current_key = _point_key(end_pt, grid_inv)
 
     max_steps = len(segments)
@@ -128,10 +128,8 @@ def _walk_loop(
         # Find next unused segment connected at current_key
         next_seg = _find_next(adjacency, used, current_key)
         if next_seg is None:
-            # Dead end — mark segments as unused so they can be retried
-            # from a different starting direction
-            for s in chain:
-                idx = segments.index(s)
+            # Dead end — release every segment we walked so a later start can retry.
+            for idx in chain_indices:
                 used[idx] = False
             return None
 
@@ -144,10 +142,14 @@ def _walk_loop(
             seg = _flip_segment(seg)
 
         chain.append(seg)
+        chain_indices.append(seg_idx)
         _, end_pt = _segment_endpoints(seg)
         current_key = _point_key(end_pt, grid_inv)
 
-    return None  # Exceeded max steps
+    # Exceeded max steps — release the chain like a dead end so other starts can try.
+    for idx in chain_indices:
+        used[idx] = False
+    return None
 
 
 def _find_next(
@@ -191,19 +193,30 @@ def lwpolyline_to_closed_path(
 
     Args:
         points: List of (x, y) vertex positions.
-        bulges: List of bulge values per vertex (0 = straight segment).
+        bulges: List of bulge values per vertex (0 = straight segment). Must be
+            the same length as ``points``.
         layer: DXF layer name.
 
     Returns:
         A ClosedPath representing the polyline.
+
+    Raises:
+        ValueError: If ``len(bulges) != len(points)``.
     """
+    if len(bulges) != len(points):
+        msg = (
+            f"lwpolyline_to_closed_path: len(bulges)={len(bulges)} does not "
+            f"match len(points)={len(points)} (layer={layer!r})"
+        )
+        raise ValueError(msg)
+
     segments: list[PathSegment] = []
     n = len(points)
 
     for i in range(n):
         p1 = Point(points[i][0], points[i][1])
         p2 = Point(points[(i + 1) % n][0], points[(i + 1) % n][1])
-        bulge = bulges[i] if i < len(bulges) else 0.0
+        bulge = bulges[i]
 
         if abs(bulge) < 1e-10:
             segments.append(LinePathSegment(start=p1, end=p2))

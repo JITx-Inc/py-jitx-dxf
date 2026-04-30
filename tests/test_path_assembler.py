@@ -119,6 +119,12 @@ class TestLwpolylineToClosedPath:
         assert isinstance(path.segments[0], ArcPathSegment)
         assert isinstance(path.segments[1], LinePathSegment)
 
+    def test_bulge_length_mismatch_raises(self):
+        """A length mismatch between points and bulges should raise immediately."""
+        points = [(0, 0), (10, 0), (10, 10), (0, 10)]
+        with pytest.raises(ValueError, match="len\\(bulges\\)"):
+            lwpolyline_to_closed_path(points, [0.0, 0.0], "test")
+
 
 class TestPathBoundingBox:
     """Test bounding box computation."""
