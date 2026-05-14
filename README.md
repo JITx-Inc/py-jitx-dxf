@@ -47,6 +47,10 @@ jitx-dxf import outline.dxf
 # Write to a file with a custom class name
 jitx-dxf import outline.dxf -o my_board.py --class-name MyBoard
 
+# For plated/electrical cutouts or holes, write them to a separate Circuit file
+# instead of Board.shape. Requires --output and writes my_board_circuit.py.
+jitx-dxf import outline.dxf -o my_board.py --class-name MyBoard --plated-features-circuit
+
 # Output only shape expressions (no class wrapper)
 jitx-dxf import outline.dxf --snippet
 
@@ -62,19 +66,23 @@ jitx-dxf import outline.dxf --no-recenter
 
 #### Generated output structure
 
-For `--class-name MyBoard`, the importer emits up to three classes:
+For `--class-name MyBoard`, the default importer output emits one Board class:
 
-* `class MyBoard(Board)` with the outline assigned to `shape`.
-* `class MyCircuit(Circuit)` whose `__init__` sets `self.cutouts` to a list of
-  `Cutout(...)` features — one per detected cutout or mounting hole. Only
-  emitted when the DXF contains cutouts or holes.
-* `class MyDesign(Design)` instantiating the Board and Circuit. Emitted
-  alongside `MyCircuit`.
+* `class MyBoard(Board)` with the outline assigned to `shape`. Detected
+  cutouts and mounting holes are emitted as non-plated board geometry in
+  `Polygon(..., holes=[...])`.
 
-A trailing `Board` suffix is stripped before deriving the Circuit/Design names
-so common inputs produce clean output (`MyBoard` → `MyCircuit`, `MyDesign`).
-Pass a name without the suffix to get verbose names (`Foo` → `FooCircuit`,
-`FooDesign`).
+Use the default mode when DXF cutouts and holes are mechanical/non-plated.
+
+Use `--plated-features-circuit` when cutouts or holes are plated or intended to
+connect electrically. This option requires `--output`. In that mode:
+
+* `my_board.py` still contains `class MyBoard(Board)`, but cutouts and holes
+  are suppressed from `Board.shape`.
+* `my_board_circuit.py` is written next to it and contains
+  `class MyCircuit(Circuit)` with matching `Cutout(...)` features, generated
+  `feature_ports`, and comments showing how to instantiate the circuit and net
+  those ports to the intended electrical connection.
 
 ### Inspect a DXF file
 

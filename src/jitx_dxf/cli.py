@@ -88,6 +88,7 @@ def _cmd_import(args: argparse.Namespace) -> None:
     from .dxf_reader import classify_entities
     from .jitx_codegen import (
         generate_board_code,
+        generate_circuit_code,
         generate_cutouts_snippet,
         generate_outline_snippet,
     )
@@ -128,10 +129,19 @@ def _cmd_import(args: argparse.Namespace) -> None:
     print(f"  Holes:        {n_holes}", file=sys.stderr)
     print(f"  Unclassified: {n_unclass}", file=sys.stderr)
 
+    has_features = bool(classified.cutouts or classified.holes)
+    if args.plated_features_circuit and has_features and not args.output:
+        print(
+            "Error: --plated-features-circuit requires --output so the "
+            "companion Circuit can be written to a separate file.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     if args.snippet:
         # Print snippet(s) to stdout
         print(generate_outline_snippet(classified, recenter=recenter))
-        if classified.cutouts or classified.holes:
+        if has_features:
             print()
             print(generate_cutouts_snippet(classified, recenter=recenter))
     else:
@@ -140,14 +150,32 @@ def _cmd_import(args: argparse.Namespace) -> None:
             class_name=args.class_name,
             module_name=input_path.name,
             recenter=recenter,
+            include_features_in_board=not args.plated_features_circuit,
         )
 
         if args.output:
             output_path = Path(args.output)
             output_path.write_text(code)
             print(f"  Written to:   {output_path}", file=sys.stderr)
+            if args.plated_features_circuit and has_features:
+                circuit_output_path = _companion_circuit_output_path(output_path)
+                circuit_code = generate_circuit_code(
+                    classified,
+                    board_class_name=args.class_name,
+                    module_name=input_path.name,
+                    recenter=recenter,
+                )
+                circuit_output_path.write_text(circuit_code)
+                print(f"  Circuit file: {circuit_output_path}", file=sys.stderr)
         else:
             print(code)
+
+
+def _companion_circuit_output_path(output_path: Path) -> Path:
+    """Return the removable companion Circuit file path for an imported Board file."""
+    suffix = output_path.suffix or ".py"
+    stem = output_path.stem if output_path.suffix else output_path.name
+    return output_path.with_name(f"{stem}_circuit{suffix}")
 
 
 def main() -> None:
@@ -207,6 +235,15 @@ def main() -> None:
         "--snippet",
         action="store_true",
         help="Output only shape expressions instead of a full Board class",
+    )
+    p_import.add_argument(
+        "--plated-features-circuit",
+        action="store_true",
+        help=(
+            "Emit cutouts/holes in a separate companion Circuit file for "
+            "plated or electrically connected features. Requires --output. "
+            "When omitted, cutouts/holes stay in Board.shape."
+        ),
     )
     p_import.add_argument(
         "--layer-map",
