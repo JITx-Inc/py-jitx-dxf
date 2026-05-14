@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
+import pytest
+
+from jitx_dxf.cli import _cmd_import
 from jitx_dxf.dxf_reader import classify_entities
 from jitx_dxf.jitx_codegen import (
     generate_board_code,
+    generate_circuit_code,
     generate_cutouts_snippet,
     generate_holes_snippet,
     generate_outline_snippet,
@@ -140,22 +145,56 @@ class TestGenerateBoardCode:
         # The old `board_shape` attribute name must not appear.
         assert "board_shape" not in code
 
-    def test_screwholes_emit_circuit_class(self):
-        """When the DXF has cutouts/holes, a Circuit subclass should be emitted."""
+    def test_screwholes_emit_board_holes(self):
+        """When the DXF has cutouts/holes, Board.shape should carry holes."""
         classified = classify_entities(str(FIXTURES / "hawk_outline_screwholes.dxf"))
         code = generate_board_code(classified, class_name="HawkBoard")
-        assert "class HawkCircuit(Circuit):" in code
-        # cutouts must be wrapped in Cutout(...) so jitx.feature.Cutout treats them as features.
-        assert "Cutout(" in code
-        assert "self.cutouts = [" in code
+        assert "class HawkCircuit" not in code
+        assert "from jitx.circuit import Circuit" not in code
+        assert "from jitx.feature import Cutout" not in code
+        assert "Cutout(" not in code
+        assert "holes=[" in code
+        assert "non-plated board geometry" in code
+        assert "separately generated companion Circuit file" in code
+        assert "feature_ports" in code
 
-    def test_screwholes_emit_design_class(self):
-        """When a Circuit is emitted, a Design class should also be emitted."""
+    def test_screwholes_emit_companion_circuit_code(self):
+        """Cutouts/holes should also have a removable companion Circuit template."""
+        classified = classify_entities(str(FIXTURES / "hawk_outline_screwholes.dxf"))
+        code = generate_circuit_code(classified, board_class_name="HawkBoard")
+        assert "from jitx.circuit import Circuit" in code
+        assert "from jitx.feature import Cutout" in code
+        assert "from jitx.net import Port, port_array" in code
+        assert "class HawkCircuit(Circuit):" in code
+        assert "self.feature_ports = port_array(4, ptype=Port)" in code
+        assert "Cutout(" in code
+        assert "plated = HawkCircuit()" in code
+        assert "chassis = Port()" in code
+        assert "plated_feature_nets = [chassis + p for p in plated.feature_ports]" in code
+        compile(code, "<hawk_screwholes_circuit>", "exec")
+
+    def test_board_can_suppress_holes_for_companion_circuit(self):
+        """Board output can omit features when a companion Circuit owns them."""
+        classified = classify_entities(str(FIXTURES / "hawk_outline_screwholes.dxf"))
+        code = generate_board_code(
+            classified,
+            class_name="HawkBoard",
+            include_features_in_board=False,
+        )
+        assert "class HawkBoard(Board):" in code
+        assert "holes=[" not in code
+        assert "Cutout(" not in code
+        assert "companion Circuit file" in code
+        compile(code, "<hawk_suppressed_board>", "exec")
+
+    def test_screwholes_omit_design_class(self):
+        """Generated output should not create a Design subclass."""
         classified = classify_entities(str(FIXTURES / "hawk_outline_screwholes.dxf"))
         code = generate_board_code(classified, class_name="HawkBoard")
-        assert "class HawkDesign(Design):" in code
-        assert "board = HawkBoard()" in code
-        assert "circuit = HawkCircuit()" in code
+        assert "from jitx.design import Design" not in code
+        assert "class HawkDesign" not in code
+        assert "board = HawkBoard()" not in code
+        assert "circuit = HawkCircuit()" not in code
 
     def test_outline_only_omits_circuit_and_design(self):
         """A DXF with only an outline should produce just a Board class."""
@@ -168,12 +207,51 @@ class TestGenerateBoardCode:
         assert "Cutout" not in code
 
     def test_class_name_without_board_suffix(self):
-        """If class_name lacks a 'Board' suffix, derived names append 'Circuit'/'Design'."""
+        """If class_name lacks a 'Board' suffix, use it directly as the Board name."""
         classified = classify_entities(str(FIXTURES / "hawk_outline_screwholes.dxf"))
         code = generate_board_code(classified, class_name="Foo")
+        circuit_code = generate_circuit_code(classified, board_class_name="Foo")
         assert "class Foo(Board):" in code
-        assert "class FooCircuit(Circuit):" in code
-        assert "class FooDesign(Design):" in code
+        assert "class FooCircuit" not in code
+        assert "class FooDesign" not in code
+        assert "class FooCircuit(Circuit):" in circuit_code
+        assert "class FooDesign" not in circuit_code
+
+    def test_circle_holes_are_board_holes(self):
+        """DxfCircle holes should be approximated into Board.shape holes."""
+        from jitx_dxf.models import (
+            ClassifiedEntities,
+            ClosedPath,
+            DxfCircle,
+            LinePathSegment,
+            Point,
+        )
+
+        outline = ClosedPath(
+            [
+                LinePathSegment(Point(0, 0), Point(10, 0)),
+                LinePathSegment(Point(10, 0), Point(10, 5)),
+                LinePathSegment(Point(10, 5), Point(0, 5)),
+                LinePathSegment(Point(0, 5), Point(0, 0)),
+            ]
+        )
+        classified = ClassifiedEntities(
+            outline=outline,
+            holes=[DxfCircle(center=Point(2.0, 3.0), radius=0.5, layer="DRILL")],
+        )
+
+        code = generate_board_code(classified, class_name="DemoBoard")
+
+        assert "holes=[" in code
+        assert "Circle(" not in code
+        assert "Cutout(" not in code
+        assert "class DemoCircuit" not in code
+        assert "(-2.5, 0.5)" in code
+
+        circuit_code = generate_circuit_code(classified, board_class_name="DemoBoard")
+        assert "from jitx.shapes.primitive import Circle" in circuit_code
+        assert "self.feature_ports = port_array(1, ptype=Port)" in circuit_code
+        assert "Cutout(Circle(radius=0.5).at(-3.0, 0.5))" in circuit_code
 
     def test_no_recenter(self):
         """With recenter=False, generated code should still compile."""
@@ -222,3 +300,73 @@ class TestSnippets:
         empty = ClassifiedEntities()
         snippet = generate_outline_snippet(empty)
         assert "No outline" in snippet
+
+
+class TestImportCli:
+    """Test CLI import output behavior."""
+
+    def test_output_default_keeps_features_in_board_only(self, tmp_path):
+        board_path = tmp_path / "hawk_board.py"
+        args = argparse.Namespace(
+            input=str(FIXTURES / "hawk_outline_screwholes.dxf"),
+            output=str(board_path),
+            class_name="HawkBoard",
+            snippet=False,
+            layer_map=None,
+            unit=None,
+            no_recenter=False,
+            plated_features_circuit=False,
+        )
+
+        _cmd_import(args)
+
+        circuit_path = tmp_path / "hawk_board_circuit.py"
+        assert board_path.exists()
+        assert not circuit_path.exists()
+        board_code = board_path.read_text()
+        assert "class HawkBoard(Board):" in board_code
+        assert "holes=[" in board_code
+        assert "class HawkCircuit" not in board_code
+
+    def test_output_flag_writes_companion_circuit_and_suppresses_board_features(
+        self, tmp_path
+    ):
+        board_path = tmp_path / "hawk_board.py"
+        args = argparse.Namespace(
+            input=str(FIXTURES / "hawk_outline_screwholes.dxf"),
+            output=str(board_path),
+            class_name="HawkBoard",
+            snippet=False,
+            layer_map=None,
+            unit=None,
+            no_recenter=False,
+            plated_features_circuit=True,
+        )
+
+        _cmd_import(args)
+
+        circuit_path = tmp_path / "hawk_board_circuit.py"
+        assert board_path.exists()
+        assert circuit_path.exists()
+        board_code = board_path.read_text()
+        circuit_code = circuit_path.read_text()
+        assert "class HawkBoard(Board):" in board_code
+        assert "holes=[" not in board_code
+        assert "companion Circuit file" in board_code
+        assert "class HawkCircuit(Circuit):" in circuit_code
+        assert "self.feature_ports = port_array(4, ptype=Port)" in circuit_code
+
+    def test_plated_features_circuit_requires_output(self):
+        args = argparse.Namespace(
+            input=str(FIXTURES / "hawk_outline_screwholes.dxf"),
+            output=None,
+            class_name="HawkBoard",
+            snippet=False,
+            layer_map=None,
+            unit=None,
+            no_recenter=False,
+            plated_features_circuit=True,
+        )
+
+        with pytest.raises(SystemExit):
+            _cmd_import(args)

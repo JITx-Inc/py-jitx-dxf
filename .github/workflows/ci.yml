@@ -22,10 +22,16 @@ jobs:
           cache: pip
 
       - name: Install package and dev deps
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,build]"
 
       - name: Lint with ruff
         run: ruff check src tests
 
       - name: Run tests
         run: pytest tests/ -v
+
+      - name: Build distributions
+        run: python -m build --sdist --wheel
+
+      - name: Check distribution metadata
+        run: twine check dist/*

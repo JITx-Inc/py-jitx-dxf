@@ -1,8 +1,9 @@
 """Generate JITX Python code from classified DXF entities.
 
-Produces a canonical JITX file containing a `Board` subclass for the outline,
-an optional `Circuit` subclass for cutouts and mounting holes (each wrapped in
-``jitx.feature.Cutout``), and a `Design` subclass that wires them together.
+Produces a canonical JITX file containing a `Board` subclass whose ``shape``
+contains the outline plus any detected cutouts and mounting holes as board
+geometry. A separate companion `Circuit` file can be generated for plated or
+electrically connected features.
 The structure mirrors the output of ``jitx-emn-importer``.
 """
 
@@ -19,40 +20,39 @@ from .models import (
 )
 from .path_assembler import path_bounding_box
 
+_ARC_APPROXIMATION_DEGREES = 10.0
+_CIRCLE_HOLE_SEGMENTS = 32
+
 
 def generate_board_code(
     classified: ClassifiedEntities,
     class_name: str = "ImportedBoard",
     module_name: str | None = None,
     recenter: bool = True,
+    include_features_in_board: bool = True,
 ) -> str:
     """Generate a complete JITX Python file from classified DXF entities.
 
     The output contains:
 
-    * ``class <Board>(Board)`` with a ``shape`` attribute holding the outline.
-    * ``class <Circuit>(Circuit)`` whose ``__init__`` assigns ``self.cutouts``
-      to a list of ``Cutout(...)`` features (only emitted when the DXF has
-      cutouts or mounting holes).
-    * ``class <Design>(Design)`` instantiating the Board and Circuit (only
-      emitted alongside the Circuit class).
+    * ``class <Board>(Board)`` with a ``shape`` attribute holding the outline,
+      cutouts, and mounting holes. Cutouts and holes are emitted as non-plated
+      board geometry.
 
     Args:
         classified: Classified DXF entities.
-        class_name: Name of the generated Board class. The Circuit and Design
-            class names are derived from this — a trailing ``Board`` suffix is
-            stripped when present (``MyBoard`` → ``MyCircuit``/``MyDesign``);
-            otherwise the suffix is appended (``Foo`` → ``FooCircuit``).
+        class_name: Name of the generated Board class.
         module_name: Optional module name for the file header docstring.
         recenter: If True, re-center the board outline to the origin and apply
             the same offset to cutouts/holes.
+        include_features_in_board: If True, detected cutouts/holes are emitted
+            as non-plated board geometry. If False, they are omitted from
+            ``Board.shape`` so a companion Circuit can own them instead.
 
     Returns:
         A string containing valid Python code.
     """
     offset = _recenter_offset(classified, recenter)
-    board_name, circuit_name, design_name = _derive_class_names(class_name)
-    has_features = bool(classified.cutouts or classified.holes)
 
     lines: list[str] = []
 
@@ -64,22 +64,42 @@ def generate_board_code(
     lines.append("")
 
     # Imports
-    lines.extend(_imports(classified, has_features))
+    lines.extend(_board_imports(classified, include_features_in_board))
     lines.append("")
     lines.append("")
 
     # Board class
-    lines.extend(_board_class_lines(classified, board_name, offset))
+    lines.extend(
+        _board_class_lines(classified, class_name, offset, include_features_in_board)
+    )
 
-    # Circuit + Design classes (only when there are features to place)
-    if has_features:
-        lines.append("")
-        lines.append("")
-        lines.extend(_circuit_class_lines(classified, circuit_name, offset))
-        lines.append("")
-        lines.append("")
-        lines.extend(_design_class_lines(board_name, circuit_name, design_name))
+    lines.append("")
+    return "\n".join(lines)
 
+
+def generate_circuit_code(
+    classified: ClassifiedEntities,
+    board_class_name: str = "ImportedBoard",
+    module_name: str | None = None,
+    recenter: bool = True,
+) -> str:
+    """Generate a companion Circuit file for plated/electrical cutouts and holes."""
+    if not classified.cutouts and not classified.holes:
+        return "# No cutouts or holes detected in DXF"
+
+    offset = _recenter_offset(classified, recenter)
+    _board_name, circuit_name = _derive_class_names(board_class_name)
+
+    lines: list[str] = []
+    if module_name:
+        lines.append(f'"""Optional plated-feature circuit imported from {module_name}."""')
+    else:
+        lines.append('"""Optional plated-feature circuit imported from DXF."""')
+    lines.append("")
+    lines.extend(_circuit_imports(classified))
+    lines.append("")
+    lines.append("")
+    lines.extend(_circuit_class_lines(classified, circuit_name, offset))
     lines.append("")
     return "\n".join(lines)
 
@@ -141,31 +161,58 @@ def _recenter_offset(classified: ClassifiedEntities, recenter: bool) -> Point:
     )
 
 
-def _derive_class_names(class_name: str) -> tuple[str, str, str]:
-    """Derive Board/Circuit/Design class names from a single user-supplied name.
+def _derive_class_names(class_name: str) -> tuple[str, str]:
+    """Derive Board/Circuit class names from a single user-supplied name.
 
     A trailing ``Board`` suffix on ``class_name`` is stripped before appending
-    ``Circuit`` and ``Design`` so common inputs like ``MyBoard`` produce clean
-    names (``MyCircuit``, ``MyDesign``).
+    ``Circuit`` so common inputs like ``MyBoard`` produce clean names
+    (``MyCircuit``).
     """
     board_name = class_name
     prefix = class_name[:-5] if class_name.endswith("Board") else class_name
     if not prefix:
         prefix = class_name
-    return board_name, f"{prefix}Circuit", f"{prefix}Design"
+    return board_name, f"{prefix}Circuit"
 
 
-def _imports(classified: ClassifiedEntities, has_features: bool) -> list[str]:
-    """Build the import block for the generated file."""
+def _board_imports(
+    classified: ClassifiedEntities, include_features_in_board: bool
+) -> list[str]:
+    """Build the import block for the generated Board file."""
     needs_arc_polygon = False
     needs_polygon = False
-    needs_circle = bool(classified.holes)
+    has_board_holes = bool(
+        include_features_in_board
+        and classified.outline
+        and (classified.cutouts or classified.holes)
+    )
 
     if classified.outline:
-        if any(isinstance(s, ArcPathSegment) for s in classified.outline.segments):
+        if has_board_holes:
+            needs_polygon = True
+        elif any(isinstance(s, ArcPathSegment) for s in classified.outline.segments):
             needs_arc_polygon = True
         elif any(isinstance(s, LinePathSegment) for s in classified.outline.segments):
             needs_polygon = True
+
+    shape_imports: list[str] = []
+    if needs_arc_polygon:
+        shape_imports.append("Arc")
+        shape_imports.append("ArcPolygon")
+    if needs_polygon:
+        shape_imports.append("Polygon")
+
+    lines = ["from jitx.board import Board"]
+    if shape_imports:
+        lines.append(f"from jitx.shapes.primitive import {', '.join(shape_imports)}")
+    return lines
+
+
+def _circuit_imports(classified: ClassifiedEntities) -> list[str]:
+    """Build the import block for the optional companion Circuit file."""
+    needs_arc_polygon = False
+    needs_polygon = False
+    needs_circle = bool(classified.holes)
 
     for path in classified.cutouts:
         if any(isinstance(s, ArcPathSegment) for s in path.segments):
@@ -182,23 +229,35 @@ def _imports(classified: ClassifiedEntities, has_features: bool) -> list[str]:
     if needs_polygon:
         shape_imports.append("Polygon")
 
-    lines = ["from jitx.board import Board"]
-    if has_features:
-        lines.append("from jitx.circuit import Circuit")
-        lines.append("from jitx.design import Design")
-        lines.append("from jitx.feature import Cutout")
+    lines = [
+        "from jitx.circuit import Circuit",
+        "from jitx.feature import Cutout",
+        "from jitx.net import Port, port_array",
+    ]
     if shape_imports:
         lines.append(f"from jitx.shapes.primitive import {', '.join(shape_imports)}")
     return lines
 
 
 def _board_class_lines(
-    classified: ClassifiedEntities, board_name: str, offset: Point
+    classified: ClassifiedEntities,
+    board_name: str,
+    offset: Point,
+    include_features_in_board: bool,
 ) -> list[str]:
     """Render the Board subclass body."""
     lines = [f"class {board_name}(Board):"]
     if classified.outline:
-        outline_expr = _outline_expression(classified.outline, offset, indent_level=1)
+        if include_features_in_board and (classified.cutouts or classified.holes):
+            lines.extend(_board_hole_comment_lines())
+        elif classified.cutouts or classified.holes:
+            lines.extend(_suppressed_board_feature_comment_lines())
+        outline_expr = _board_shape_expression(
+            classified,
+            offset,
+            indent_level=1,
+            include_features_in_board=include_features_in_board,
+        )
         lines.append(f"    shape = {outline_expr}")
     else:
         # The user must supply a real shape; jitx.Board.shape is required.
@@ -206,14 +265,42 @@ def _board_class_lines(
     return lines
 
 
+def _board_hole_comment_lines() -> list[str]:
+    """Render the note that board holes are non-electrical geometry."""
+    return [
+        "    # Cutouts and holes below are emitted as non-plated board geometry.",
+        "    # If any feature is plated or should connect electrically, use the",
+        "    # separately generated companion Circuit file and connect its",
+        "    # feature_ports.",
+    ]
+
+
+def _suppressed_board_feature_comment_lines() -> list[str]:
+    """Render the note used when a companion Circuit owns the features."""
+    return [
+        "    # Cutouts and holes are omitted from Board.shape because they are",
+        "    # emitted in the companion Circuit file for plated/electrical use.",
+    ]
+
+
 def _circuit_class_lines(
     classified: ClassifiedEntities, circuit_name: str, offset: Point
 ) -> list[str]:
-    """Render the Circuit subclass body that holds Cutout features."""
+    """Render the optional Circuit template for plated/electrical features."""
+    feature_count = len(classified.cutouts) + len(classified.holes)
     lines = [
         f"class {circuit_name}(Circuit):",
+        "    # Electrical-use template for the cutouts/holes above.",
+        "    # Keep using Board.shape for non-plated mechanical geometry.",
+        "    # If these features are plated or electrically connected, instantiate",
+        "    # this Circuit in your design and net feature_ports to the intended",
+        "    # electrical ports, for example:",
+        f"    #     plated = {circuit_name}()",
+        "    #     chassis = Port()",
+        "    #     plated_feature_nets = [chassis + p for p in plated.feature_ports]",
         "    def __init__(self):",
         "        super().__init__()",
+        f"        self.feature_ports = port_array({feature_count}, ptype=Port)",
         "        self.cutouts = [",
     ]
     for cutout in classified.cutouts:
@@ -225,21 +312,56 @@ def _circuit_class_lines(
     return lines
 
 
-def _design_class_lines(board_name: str, circuit_name: str, design_name: str) -> list[str]:
-    """Render a Design subclass that wires the Board and Circuit together."""
-    return [
-        f"class {design_name}(Design):",
-        f"    board = {board_name}()",
-        f"    circuit = {circuit_name}()",
-    ]
-
-
 def _circle_expression(hole, offset: Point) -> str:
     """Format a ``Circle(...).at(x, y)`` expression for a mounting hole."""
     cx = _fmt(hole.center.x + offset.x)
     cy = _fmt(hole.center.y + offset.y)
     r = _fmt(hole.radius)
     return f"Circle(radius={r}).at({cx}, {cy})"
+
+
+def _board_shape_expression(
+    classified: ClassifiedEntities,
+    offset: Point,
+    indent_level: int,
+    include_features_in_board: bool,
+) -> str:
+    """Generate the Board.shape expression, including non-plated holes."""
+    assert classified.outline is not None
+    if (
+        not include_features_in_board
+        or (not classified.cutouts and not classified.holes)
+    ):
+        return _outline_expression(classified.outline, offset, indent_level)
+    return _polygon_with_holes_expression(classified, offset, indent_level)
+
+
+def _polygon_with_holes_expression(
+    classified: ClassifiedEntities, offset: Point, indent_level: int
+) -> str:
+    """Generate a Polygon(..., holes=[...]) expression for board geometry."""
+    assert classified.outline is not None
+
+    outer_points = _path_points(classified.outline, offset)
+    hole_points = _board_hole_points(classified, offset)
+
+    arg_indent = indent_level + 1
+    pad = "    " * indent_level
+    outer_expr = _point_list_expression(outer_points, arg_indent)
+    holes_expr = _holes_argument_expression(hole_points, arg_indent)
+    return f"Polygon(\n{outer_expr},\n{holes_expr},\n{pad})"
+
+
+def _board_hole_points(classified: ClassifiedEntities, offset: Point) -> list[list[Point]]:
+    """Return point-list boundaries for every board cutout and mounting hole."""
+    holes: list[list[Point]] = []
+    for cutout in classified.cutouts:
+        points = _path_points(cutout, offset)
+        if len(points) >= 3:
+            holes.append(points)
+    for hole in classified.holes:
+        holes.append(_circle_points(hole, offset))
+    return holes
 
 
 def _outline_expression(path: ClosedPath, offset: Point, indent_level: int) -> str:
@@ -264,12 +386,7 @@ def _outline_expression(path: ClosedPath, offset: Point, indent_level: int) -> s
 
 def _polygon_expression(path: ClosedPath, offset: Point, indent_level: int) -> str:
     """Generate a Polygon expression from a path with only line segments."""
-    points: list[str] = []
-    for seg in path.segments:
-        if isinstance(seg, LinePathSegment):
-            x = _fmt(seg.start.x + offset.x)
-            y = _fmt(seg.start.y + offset.y)
-            points.append(f"({x}, {y})")
+    points = [_point_expression(point) for point in _path_points(path, offset)]
 
     if len(points) <= 6:
         return f"Polygon([{', '.join(points)}])"
@@ -317,6 +434,80 @@ def _path_expression(path: ClosedPath, offset: Point, indent_level: int) -> str:
     if has_arcs:
         return _arc_polygon_expression(path, offset, indent_level)
     return _polygon_expression(path, offset, indent_level)
+
+
+def _path_points(path: ClosedPath, offset: Point) -> list[Point]:
+    """Generate point vertices from a path, approximating arcs when needed."""
+    points: list[Point] = []
+    for seg in path.segments:
+        if isinstance(seg, LinePathSegment):
+            points.append(Point(seg.start.x + offset.x, seg.start.y + offset.y))
+        elif isinstance(seg, ArcPathSegment):
+            points.append(
+                Point(seg.start_point.x + offset.x, seg.start_point.y + offset.y)
+            )
+            points.extend(_arc_intermediate_points(seg, offset))
+    return points
+
+
+def _arc_intermediate_points(seg: ArcPathSegment, offset: Point) -> list[Point]:
+    """Sample intermediate points along an arc for Polygon hole boundaries."""
+    sweep = seg.end_angle - seg.start_angle
+    if abs(sweep) < 1e-9:
+        return []
+
+    steps = max(1, math.ceil(abs(sweep) / _ARC_APPROXIMATION_DEGREES))
+    points: list[Point] = []
+    for i in range(1, steps):
+        angle = math.radians(seg.start_angle + sweep * i / steps)
+        points.append(
+            Point(
+                seg.center.x + offset.x + seg.radius * math.cos(angle),
+                seg.center.y + offset.y + seg.radius * math.sin(angle),
+            )
+        )
+    return points
+
+
+def _circle_points(hole, offset: Point) -> list[Point]:
+    """Approximate a circular board hole as a polygon boundary."""
+    points: list[Point] = []
+    for i in range(_CIRCLE_HOLE_SEGMENTS):
+        angle = 2.0 * math.pi * i / _CIRCLE_HOLE_SEGMENTS
+        points.append(
+            Point(
+                hole.center.x + offset.x + hole.radius * math.cos(angle),
+                hole.center.y + offset.y + hole.radius * math.sin(angle),
+            )
+        )
+    return points
+
+
+def _holes_argument_expression(hole_points: list[list[Point]], indent_level: int) -> str:
+    """Format the holes= argument for Polygon(...)."""
+    pad = "    " * indent_level
+    lines = [f"{pad}holes=["]
+    for points in hole_points:
+        lines.append(f"{_point_list_expression(points, indent_level + 1)},")
+    lines.append(f"{pad}]")
+    return "\n".join(lines)
+
+
+def _point_list_expression(points: list[Point], indent_level: int) -> str:
+    """Format a Python list of point tuples."""
+    point_exprs = [_point_expression(point) for point in points]
+    pad = "    " * indent_level
+    if len(point_exprs) <= 6:
+        return f"{pad}[{', '.join(point_exprs)}]"
+
+    inner_pad = "    " * (indent_level + 1)
+    inner = f",\n{inner_pad}".join(point_exprs)
+    return f"{pad}[\n{inner_pad}{inner},\n{pad}]"
+
+
+def _point_expression(point: Point) -> str:
+    """Format a single point tuple."""
+    return f"({_fmt(point.x)}, {_fmt(point.y)})"
 
 
 def _is_axis_aligned_rectangle(path: ClosedPath) -> bool:

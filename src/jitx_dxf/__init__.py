@@ -6,6 +6,7 @@ from .dxf_reader import classify_entities, read_dxf
 from .dxf_writer import convert
 from .jitx_codegen import (
     generate_board_code,
+    generate_circuit_code,
     generate_cutouts_snippet,
     generate_holes_snippet,
     generate_outline_snippet,
@@ -18,6 +19,7 @@ __all__ = [
     "classify_entities",
     "convert",
     "generate_board_code",
+    "generate_circuit_code",
     "generate_cutouts_snippet",
     "generate_holes_snippet",
     "generate_outline_snippet",
