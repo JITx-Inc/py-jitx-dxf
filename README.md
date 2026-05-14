@@ -18,6 +18,17 @@ run directly from source without installing:
 python -m jitx_dxf <subcommand> [options]
 ```
 
+## Packaging
+
+The project is configured for future PyPI distribution with Hatchling. To build
+and validate local distribution artifacts without publishing:
+
+```bash
+pip install -e ".[build]"
+python -m build --sdist --wheel
+twine check dist/*
+```
+
 ## Usage
 
 ### Export: JITX XML to DXF
